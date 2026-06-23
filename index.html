@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ADPlayer Prototype</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+    }
+
+    body {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 1rem;
+    }
+
+    main {
+      display: grid;
+      gap: 1rem;
+    }
+
+    video {
+      width: 100%;
+      max-height: 65vh;
+      background: black;
+    }
+
+    .panel {
+      border: 1px solid currentColor;
+      border-radius: 0.75rem;
+      padding: 1rem;
+    }
+
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: center;
+    }
+
+    button, input[type="checkbox"] {
+      font: inherit;
+    }
+
+    button {
+      padding: 0.55rem 0.8rem;
+      border-radius: 0.5rem;
+      border: 1px solid currentColor;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    .error {
+      border: 2px solid #b00020;
+      padding: 1rem;
+      border-radius: 0.75rem;
+      font-weight: 700;
+    }
+
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>ADPlayer Prototype</h1>
+
+    <div id="unsupported" class="error" role="alert" hidden></div>
+
+    <section aria-labelledby="video-heading">
+      <h2 id="video-heading">Video</h2>
+      <video id="video" controls preload="metadata">
+        <source src="frozen.mp4" type="video/mp4" />
+        Your browser does not support HTML video.
+      </video>
+      <audio id="adAudio" preload="metadata" src="frozen.ad.mp3"></audio>
+    </section>
+
+    <section class="panel" aria-labelledby="ad-heading">
+      <h2 id="ad-heading">Audio Description</h2>
+
+      <div class="row">
+        <label>
+          <input id="playAD" type="checkbox" />
+          Play Audio Description
+        </label>
+
+        <button id="adDestination" type="button" disabled aria-describedby="destination-help">
+          AD destination: System default
+        </button>
+      </div>
+
+      <p id="destination-help">
+        When Audio Description is enabled, activate this button to choose where the Audio Description track plays.
+        In supported browsers, this can be a headset while the main video audio continues through the system default speakers.
+      </p>
+
+      <p id="status" role="status" aria-live="polite">Audio Description is off.</p>
+    </section>
+  </main>
+
+  <script>
+    (() => {
+      const video = document.getElementById('video');
+      const adAudio = document.getElementById('adAudio');
+      const playAD = document.getElementById('playAD');
+      const adDestination = document.getElementById('adDestination');
+      const status = document.getElementById('status');
+      const unsupported = document.getElementById('unsupported');
+
+      const DRIFT_TOLERANCE_SECONDS = 0.08;
+      let syncTimer = null;
+      let selectedSinkId = '';
+      let selectedSinkLabel = 'System default';
+
+      function setStatus(message) {
+        status.textContent = message;
+      }
+
+      function setDestinationLabel(label) {
+        selectedSinkLabel = label || 'System default';
+        adDestination.textContent = `AD destination: ${selectedSinkLabel}`;
+      }
+
+      function showFatalError(message) {
+        unsupported.hidden = false;
+        unsupported.textContent = message;
+        playAD.disabled = true;
+        adDestination.disabled = true;
+      }
+
+      function checkSupport() {
+        const missing = [];
+        if (!window.isSecureContext) {
+          missing.push('This page is not running in a secure context. Use HTTPS, such as GitHub Pages.');
+        }
+        if (!('mediaDevices' in navigator)) {
+          missing.push('navigator.mediaDevices is not available.');
+        }
+        if (!('setSinkId' in HTMLMediaElement.prototype)) {
+          missing.push('HTMLMediaElement.setSinkId is not available.');
+        }
+        if (!navigator.mediaDevices || !('selectAudioOutput' in navigator.mediaDevices)) {
+          missing.push('navigator.mediaDevices.selectAudioOutput is not available.');
+        }
+        if (missing.length > 0) {
+          showFatalError('ADPlayer cannot run in this browser: ' + missing.join(' '));
+          return false;
+        }
+        return true;
+      }
+
+      async function tryDiscoverDefaultDeviceName() {
+        try {
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const defaultOutput = devices.find(device => device.kind === 'audiooutput' && device.deviceId === 'default');
+          if (defaultOutput && defaultOutput.label) {
+            setDestinationLabel(defaultOutput.label);
+          }
+        } catch {
+          // Some browsers restrict labels until the user has granted permission. System default is acceptable initially.
+        }
+      }
+
+      async function routeADToSelectedSink() {
+        await adAudio.setSinkId(selectedSinkId);
+      }
+
+      async function chooseADDestination() {
+        try {
+          const device = await navigator.mediaDevices.selectAudioOutput();
+          selectedSinkId = device.deviceId || '';
+          setDestinationLabel(device.label || 'Selected audio device');
+          await routeADToSelectedSink();
+          setStatus(`Audio Description destination set to ${selectedSinkLabel}.`);
+        } catch (error) {
+          setStatus('Audio Description destination was not changed.');
+          console.error(error);
+        }
+      }
+
+      function syncADToVideo(force = false) {
+        if (!playAD.checked) return;
+
+        const drift = Math.abs(video.currentTime - adAudio.currentTime);
+        if (force || drift > DRIFT_TOLERANCE_SECONDS) {
+          adAudio.currentTime = video.currentTime;
+        }
+      }
+
+      async function startADIfNeeded() {
+        if (!playAD.checked) return;
+        syncADToVideo(true);
+        try {
+          if (selectedSinkId !== undefined) {
+            await routeADToSelectedSink();
+          }
+          if (!video.paused && !video.ended) {
+            await adAudio.play();
+          }
+          setStatus(`Audio Description is on. Destination: ${selectedSinkLabel}.`);
+        } catch (error) {
+          playAD.checked = false;
+          adDestination.disabled = true;
+          adAudio.pause();
+          setStatus('Audio Description could not start. Check browser permissions and output device support.');
+          console.error(error);
+        }
+      }
+
+      function stopAD() {
+        adAudio.pause();
+        setStatus('Audio Description is off.');
+      }
+
+      function startSyncLoop() {
+        if (syncTimer) return;
+        syncTimer = window.setInterval(() => syncADToVideo(false), 500);
+      }
+
+      function stopSyncLoop() {
+        if (syncTimer) {
+          window.clearInterval(syncTimer);
+          syncTimer = null;
+        }
+      }
+
+      function wireEvents() {
+        playAD.addEventListener('change', async () => {
+          adDestination.disabled = !playAD.checked;
+          if (playAD.checked) {
+            await startADIfNeeded();
+            startSyncLoop();
+          } else {
+            stopAD();
+            stopSyncLoop();
+          }
+        });
+
+        adDestination.addEventListener('click', chooseADDestination);
+
+        video.addEventListener('play', async () => {
+          if (playAD.checked) {
+            syncADToVideo(true);
+            try {
+              await adAudio.play();
+            } catch (error) {
+              setStatus('Audio Description could not play. The browser may require another user action.');
+              console.error(error);
+            }
+          }
+        });
+
+        video.addEventListener('pause', () => {
+          adAudio.pause();
+        });
+
+        video.addEventListener('seeking', () => syncADToVideo(true));
+        video.addEventListener('seeked', () => syncADToVideo(true));
+        video.addEventListener('ratechange', () => {
+          adAudio.playbackRate = video.playbackRate;
+        });
+        video.addEventListener('ended', () => {
+          adAudio.pause();
+          adAudio.currentTime = 0;
+        });
+      }
+
+      if (checkSupport()) {
+        wireEvents();
+        tryDiscoverDefaultDeviceName();
+      }
+    })();
+  </script>
+</body>
+</html>
