@@ -148,19 +148,22 @@
       function checkSupport() {
         const missing = [];
         if (!window.isSecureContext) {
-          missing.push('This page is not running in a secure context. Use HTTPS, such as GitHub Pages.');
+          missing.push('secure context (HTTPS, such as GitHub Pages)');
         }
         if (!('mediaDevices' in navigator)) {
-          missing.push('navigator.mediaDevices is not available.');
+          missing.push('navigator.mediaDevices');
         }
         if (!('setSinkId' in HTMLMediaElement.prototype)) {
-          missing.push('HTMLMediaElement.setSinkId is not available.');
+          missing.push('HTMLMediaElement.setSinkId');
         }
         if (!navigator.mediaDevices || !('selectAudioOutput' in navigator.mediaDevices)) {
-          missing.push('navigator.mediaDevices.selectAudioOutput is not available.');
+          missing.push('navigator.mediaDevices.selectAudioOutput');
         }
         if (missing.length > 0) {
-          showFatalError('ADPlayer cannot run in this browser: ' + missing.join(' '));
+          // Keep the full technical list out of the alert so a screen reader hears one
+          // concise message instead of every failed capability check on page load.
+          console.error('ADPlayer is unsupported here. Missing: ' + missing.join(', ') + '.');
+          showFatalError('ADPlayer needs a Chromium browser such as Chrome or Edge, served over HTTPS, to route Audio Description to a separate audio device.');
           return false;
         }
         return true;
