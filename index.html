@@ -101,14 +101,16 @@
           Play Audio Description
         </label>
 
-        <button id="adDestination" type="button" disabled aria-describedby="destination-help">
-          AD destination: System default
-        </button>
+        <label for="adDestination">AD destination</label>
+        <select id="adDestination" disabled aria-describedby="destination-help">
+          <option value="">System default</option>
+        </select>
       </div>
 
       <p id="destination-help">
-        When Audio Description is enabled, activate this button to choose where the Audio Description track plays.
-        In supported browsers, this can be a headset while the main video audio continues through the system default speakers.
+        When Audio Description is enabled, choose where the Audio Description track plays.
+        This can be a headset while the main video audio continues through the system default speakers.
+        Device names appear once the browser has audio permission; otherwise outputs are listed generically.
       </p>
 
       <p id="status" role="status" aria-live="polite">Audio Description is off.</p>
@@ -133,9 +135,9 @@
         status.textContent = message;
       }
 
-      function setDestinationLabel(label) {
-        selectedSinkLabel = label || 'System default';
-        adDestination.textContent = `AD destination: ${selectedSinkLabel}`;
+      function setDestinationLabelFromSelection() {
+        const option = adDestination.options[adDestination.selectedIndex];
+        selectedSinkLabel = (option && option.text) || 'System default';
       }
 
       function showFatalError(message) {
@@ -156,9 +158,6 @@
         if (!('setSinkId' in HTMLMediaElement.prototype)) {
           missing.push('HTMLMediaElement.setSinkId');
         }
-        if (!navigator.mediaDevices || !('selectAudioOutput' in navigator.mediaDevices)) {
-          missing.push('navigator.mediaDevices.selectAudioOutput');
-        }
         if (missing.length > 0) {
           // Keep the full technical list out of the alert so a screen reader hears one
           // concise message instead of every failed capability check on page load.
@@ -169,15 +168,42 @@
         return true;
       }
 
-      async function tryDiscoverDefaultDeviceName() {
+      async function populateDevices() {
         try {
           const devices = await navigator.mediaDevices.enumerateDevices();
-          const defaultOutput = devices.find(device => device.kind === 'audiooutput' && device.deviceId === 'default');
-          if (defaultOutput && defaultOutput.label) {
-            setDestinationLabel(defaultOutput.label);
+          const outputs = devices.filter(device => device.kind === 'audiooutput');
+          const previousSinkId = selectedSinkId;
+
+          // Rebuild the list, always keeping an explicit "System default" entry whose
+          // empty deviceId resets setSinkId to the OS default. The 'default' device is
+          // skipped because it duplicates that same system-default destination.
+          adDestination.textContent = '';
+          const systemDefault = document.createElement('option');
+          systemDefault.value = '';
+          systemDefault.textContent = 'System default';
+          adDestination.appendChild(systemDefault);
+
+          let unnamedIndex = 1;
+          for (const device of outputs) {
+            if (device.deviceId === '' || device.deviceId === 'default') continue;
+            const option = document.createElement('option');
+            option.value = device.deviceId;
+            // Labels are blank until the page is granted audio permission, so fall back
+            // to a positional name to keep every device individually selectable.
+            option.textContent = device.label || `Audio output ${unnamedIndex}`;
+            adDestination.appendChild(option);
+            unnamedIndex++;
           }
-        } catch {
-          // Some browsers restrict labels until the user has granted permission. System default is acceptable initially.
+
+          adDestination.value = previousSinkId;
+          if (adDestination.value !== previousSinkId) {
+            // The previously selected device disappeared; fall back to system default.
+            adDestination.value = '';
+            selectedSinkId = '';
+          }
+          setDestinationLabelFromSelection();
+        } catch (error) {
+          console.error(error);
         }
       }
 
@@ -185,15 +211,14 @@
         await adAudio.setSinkId(selectedSinkId);
       }
 
-      async function chooseADDestination() {
+      async function onDestinationChange() {
+        selectedSinkId = adDestination.value;
+        setDestinationLabelFromSelection();
         try {
-          const device = await navigator.mediaDevices.selectAudioOutput();
-          selectedSinkId = device.deviceId || '';
-          setDestinationLabel(device.label || 'Selected audio device');
           await routeADToSelectedSink();
           setStatus(`Audio Description destination set to ${selectedSinkLabel}.`);
         } catch (error) {
-          setStatus('Audio Description destination was not changed.');
+          setStatus('Audio Description destination could not be changed.');
           console.error(error);
         }
       }
@@ -256,7 +281,9 @@
           }
         });
 
-        adDestination.addEventListener('click', chooseADDestination);
+        adDestination.addEventListener('change', onDestinationChange);
+
+        navigator.mediaDevices.addEventListener('devicechange', populateDevices);
 
         video.addEventListener('play', async () => {
           if (playAD.checked) {
@@ -287,7 +314,7 @@
 
       if (checkSupport()) {
         wireEvents();
-        tryDiscoverDefaultDeviceName();
+        populateDevices();
       }
     })();
   </script>
