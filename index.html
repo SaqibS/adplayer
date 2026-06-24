@@ -85,11 +85,15 @@
 
     <section aria-labelledby="video-heading">
       <h2 id="video-heading">Video</h2>
-      <video id="video" controls preload="metadata">
+      <video id="video" controls preload="metadata" aria-label="Frozen video">
         <source src="frozen.mp4" type="video/mp4" />
         Your browser does not support HTML video.
       </video>
       <audio id="adAudio" preload="metadata" src="frozen.ad.mp3"></audio>
+
+      <div class="row">
+        <button id="playPause" type="button">Play video</button>
+      </div>
     </section>
 
     <section class="panel" aria-labelledby="ad-heading">
@@ -97,7 +101,7 @@
 
       <div class="row">
         <label>
-          <input id="playAD" type="checkbox" />
+          <input id="playAD" type="checkbox" aria-describedby="destination-help" />
           Play Audio Description
         </label>
 
@@ -124,6 +128,7 @@
       const adAudio = document.getElementById('adAudio');
       const playAD = document.getElementById('playAD');
       const adDestination = document.getElementById('adDestination');
+      const playPause = document.getElementById('playPause');
       const status = document.getElementById('status');
       const unsupported = document.getElementById('unsupported');
 
@@ -144,8 +149,17 @@
       function showFatalError(message) {
         unsupported.hidden = false;
         unsupported.textContent = message;
+        // Move focus to the alert so screen reader users land on the reason the
+        // controls are disabled instead of tabbing through dead controls.
+        unsupported.tabIndex = -1;
+        unsupported.focus();
         playAD.disabled = true;
         adDestination.disabled = true;
+        playPause.disabled = true;
+      }
+
+      function updatePlayPauseLabel() {
+        playPause.textContent = video.paused ? 'Play video' : 'Pause video';
       }
 
       function checkSupport() {
@@ -309,9 +323,18 @@
 
         adDestination.addEventListener('change', onDestinationChange);
 
+        playPause.addEventListener('click', () => {
+          if (video.paused) {
+            video.play();
+          } else {
+            video.pause();
+          }
+        });
+
         navigator.mediaDevices.addEventListener('devicechange', populateDevices);
 
         video.addEventListener('play', async () => {
+          updatePlayPauseLabel();
           if (playAD.checked) {
             syncADToVideo(true);
             try {
@@ -324,6 +347,7 @@
         });
 
         video.addEventListener('pause', () => {
+          updatePlayPauseLabel();
           adAudio.pause();
         });
 
@@ -333,6 +357,7 @@
           adAudio.playbackRate = video.playbackRate;
         });
         video.addEventListener('ended', () => {
+          updatePlayPauseLabel();
           adAudio.pause();
           adAudio.currentTime = 0;
         });
