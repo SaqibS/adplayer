@@ -110,7 +110,8 @@
       <p id="destination-help">
         When Audio Description is enabled, choose where the Audio Description track plays.
         This can be a headset while the main video audio continues through the system default speakers.
-        Device names appear once the browser has audio permission; otherwise outputs are listed generically.
+        Device names and Bluetooth outputs appear after you allow the one-time microphone
+        permission prompt, which the browser requires before it will reveal audio devices.
       </p>
 
       <p id="status" role="status" aria-live="polite">Audio Description is off.</p>
@@ -166,6 +167,25 @@
           return false;
         }
         return true;
+      }
+
+      let audioAccessRequested = false;
+
+      // Output devices and their labels stay hidden until the page holds an audio
+      // permission grant, so Bluetooth and named devices only appear after this runs.
+      // Must be called from a user gesture or the browser may suppress the prompt.
+      async function ensureDeviceAccess() {
+        if (audioAccessRequested) return;
+        audioAccessRequested = true;
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          // We only needed the grant to unlock the device list, not the mic itself.
+          stream.getTracks().forEach(track => track.stop());
+        } catch (error) {
+          // Permission denied or no input device: fall back to the generic list.
+          console.error(error);
+        }
+        await populateDevices();
       }
 
       async function populateDevices() {
@@ -273,6 +293,7 @@
         playAD.addEventListener('change', async () => {
           adDestination.disabled = !playAD.checked;
           if (playAD.checked) {
+            await ensureDeviceAccess();
             await startADIfNeeded();
             startSyncLoop();
           } else {
@@ -280,6 +301,11 @@
             stopSyncLoop();
           }
         });
+
+        // Opening the dropdown is a user gesture; use it to unlock the full device
+        // list the first time so Bluetooth and named outputs are selectable.
+        adDestination.addEventListener('pointerdown', ensureDeviceAccess);
+        adDestination.addEventListener('keydown', ensureDeviceAccess);
 
         adDestination.addEventListener('change', onDestinationChange);
 
