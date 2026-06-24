@@ -124,16 +124,14 @@
       const adAudio = document.getElementById('adAudio');
       const playAD = document.getElementById('playAD');
       const adDestination = document.getElementById('adDestination');
-      const status = document.getElementById('status');
+      const statusEl = document.getElementById('status');
       const unsupported = document.getElementById('unsupported');
 
-      const DRIFT_TOLERANCE_SECONDS = 0.08;
-      let syncTimer = null;
       let selectedSinkId = '';
       let selectedSinkLabel = 'System default';
 
       function setStatus(message) {
-        status.textContent = message;
+        statusEl.textContent = message;
       }
 
       function setDestinationLabelFromSelection() {
@@ -163,7 +161,7 @@
           // Keep the full technical list out of the alert so a screen reader hears one
           // concise message instead of every failed capability check on page load.
           console.error('ADPlayer is unsupported here. Missing: ' + missing.join(', ') + '.');
-          showFatalError('ADPlayer needs a Chromium browser such as Chrome or Edge, served over HTTPS, to route Audio Description to a separate audio device.');
+          showFatalError('ADPlayer needs a desktop browser (Chrome, Edge, Firefox, or Safari 18.4+) or iOS Safari 18.4+, served over HTTPS, to route Audio Description to a separate audio device. Android browsers are not supported.');
           return false;
         }
         return true;
@@ -236,29 +234,39 @@
         setDestinationLabelFromSelection();
         try {
           await routeADToSelectedSink();
-          setStatus(`Audio Description destination set to ${selectedSinkLabel}.`);
+          if (playAD.checked) {
+            setStatus(`Audio Description destination set to ${selectedSinkLabel}.`);
+          }
         } catch (error) {
           setStatus('Audio Description destination could not be changed.');
           console.error(error);
         }
       }
 
-      function syncADToVideo(force = false) {
+      // Both media elements share one audio clock when routed to the same device, so a
+      // one-shot realign on play/seek/buffer-recovery keeps them locked without a polling
+      // loop. (Cross-device clock skew on long videos is a known, accepted limitation.)
+      function resyncADToVideo() {
         if (!playAD.checked) return;
+        adAudio.currentTime = video.currentTime;
+      }
 
-        const drift = Math.abs(video.currentTime - adAudio.currentTime);
-        if (force || drift > DRIFT_TOLERANCE_SECONDS) {
-          adAudio.currentTime = video.currentTime;
+      async function playADWithVideo() {
+        if (!playAD.checked) return;
+        resyncADToVideo();
+        try {
+          await adAudio.play();
+        } catch (error) {
+          setStatus('Audio Description could not play. The browser may require another user action.');
+          console.error(error);
         }
       }
 
       async function startADIfNeeded() {
         if (!playAD.checked) return;
-        syncADToVideo(true);
+        resyncADToVideo();
         try {
-          if (selectedSinkId !== undefined) {
-            await routeADToSelectedSink();
-          }
+          await routeADToSelectedSink();
           if (!video.paused && !video.ended) {
             await adAudio.play();
           }
@@ -277,28 +285,14 @@
         setStatus('Audio Description is off.');
       }
 
-      function startSyncLoop() {
-        if (syncTimer) return;
-        syncTimer = window.setInterval(() => syncADToVideo(false), 500);
-      }
-
-      function stopSyncLoop() {
-        if (syncTimer) {
-          window.clearInterval(syncTimer);
-          syncTimer = null;
-        }
-      }
-
       function wireEvents() {
         playAD.addEventListener('change', async () => {
           adDestination.disabled = !playAD.checked;
           if (playAD.checked) {
             await ensureDeviceAccess();
             await startADIfNeeded();
-            startSyncLoop();
           } else {
             stopAD();
-            stopSyncLoop();
           }
         });
 
@@ -311,24 +305,18 @@
 
         navigator.mediaDevices.addEventListener('devicechange', populateDevices);
 
-        video.addEventListener('play', async () => {
-          if (playAD.checked) {
-            syncADToVideo(true);
-            try {
-              await adAudio.play();
-            } catch (error) {
-              setStatus('Audio Description could not play. The browser may require another user action.');
-              console.error(error);
-            }
-          }
-        });
+        // 'playing' (not 'play') fires both on initial start and after a buffering stall
+        // recovers, so it is the single point that realigns and resumes the AD track.
+        video.addEventListener('playing', playADWithVideo);
+
+        // Buffering started: hold the AD track so it doesn't run ahead of the stalled video.
+        video.addEventListener('waiting', () => adAudio.pause());
 
         video.addEventListener('pause', () => {
           adAudio.pause();
         });
 
-        video.addEventListener('seeking', () => syncADToVideo(true));
-        video.addEventListener('seeked', () => syncADToVideo(true));
+        video.addEventListener('seeked', resyncADToVideo);
         video.addEventListener('ratechange', () => {
           adAudio.playbackRate = video.playbackRate;
         });
