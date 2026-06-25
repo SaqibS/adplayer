@@ -75,16 +75,83 @@
       white-space: nowrap;
       border: 0;
     }
+
+    .lede {
+      max-width: 60ch;
+      font-size: 1.05rem;
+    }
+
+    .routing {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+
+    .stream {
+      flex: 1 1 16rem;
+      border: 1px solid currentColor;
+      border-radius: 0.75rem;
+      padding: 0.85rem 1rem;
+      display: grid;
+      gap: 0.25rem;
+    }
+
+    .stream-role {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      opacity: 0.75;
+    }
+
+    .stream-dest {
+      font-size: 1.25rem;
+      font-weight: 700;
+    }
+
+    .activity {
+      margin-top: 0.35rem;
+      width: 0.85rem;
+      height: 0.85rem;
+      border-radius: 50%;
+      border: 1px solid currentColor;
+      opacity: 0.35;
+    }
+
+    .activity.active {
+      opacity: 1;
+      background: #16a34a;
+      border-color: #16a34a;
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.35); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .activity.active { animation: none; }
+    }
+
+    .hint {
+      max-width: 60ch;
+      opacity: 0.85;
+    }
   </style>
 </head>
 <body>
   <main>
     <h1>ADPlayer Prototype</h1>
+    <p class="lede">
+      One video timeline, with its audio split to two destinations: the main soundtrack
+      stays on the room speakers while the audio-description narration plays on a private
+      headset — in sync.
+    </p>
 
     <div id="unsupported" class="error" hidden></div>
 
     <section>
-      <h2>Video</h2>
+      <h2 class="visually-hidden">Video</h2>
       <video id="video" controls preload="metadata">
         <source src="frozen.mp4" type="video/mp4" />
         Your browser does not support HTML video.
@@ -92,29 +159,48 @@
       <audio id="adAudio" preload="metadata" src="frozen.ad.mp3"></audio>
     </section>
 
+    <section class="panel" aria-label="Audio routing">
+      <h2>Audio routing</h2>
+      <div class="routing">
+        <div class="stream">
+          <span class="stream-role">Main soundtrack</span>
+          <span class="stream-dest" id="mainDest">System default speakers</span>
+          <span class="activity" id="mainActivity" aria-hidden="true"></span>
+        </div>
+        <div class="stream">
+          <span class="stream-role">Audio description</span>
+          <span class="stream-dest" id="adDest">Off</span>
+          <span class="activity" id="adActivity" aria-hidden="true"></span>
+        </div>
+      </div>
+    </section>
+
     <section class="panel">
-      <h2>Audio Description</h2>
+      <h2>Controls</h2>
 
       <div class="row">
         <label>
           <input id="playAD" type="checkbox" />
-          Play Audio Description
+          Play audio description
         </label>
-
-        <label for="adDestination">AD destination</label>
-        <select id="adDestination" disabled>
-          <option value="">System default</option>
-        </select>
       </div>
 
-      <p>
-        When Audio Description is enabled, choose where the Audio Description track plays.
-        This can be a headset while the main video audio continues through the system default speakers.
-        Device names and Bluetooth outputs appear after you allow the one-time microphone
-        permission prompt, which the browser requires before it will reveal audio devices.
+      <div class="row">
+        <label for="adDestination">Audio description device</label>
+        <select id="adDestination">
+          <option value="">System default</option>
+        </select>
+        <button id="enableDevices" type="button">Enable device selection</button>
+      </div>
+
+      <p class="hint">
+        Browsers hide audio output names until a page has audio permission, so the
+        list shows generic entries until you choose “Enable device selection” and accept
+        the one-time microphone prompt. The microphone is never recorded — the grant only
+        unlocks the names of your speakers and headsets.
       </p>
 
-      <p id="status">Audio Description is off.</p>
+      <p id="status">Audio description is off.</p>
     </section>
   </main>
 
@@ -126,6 +212,10 @@
       const adDestination = document.getElementById('adDestination');
       const statusEl = document.getElementById('status');
       const unsupported = document.getElementById('unsupported');
+      const enableDevices = document.getElementById('enableDevices');
+      const adDest = document.getElementById('adDest');
+      const mainActivity = document.getElementById('mainActivity');
+      const adActivity = document.getElementById('adActivity');
 
       let selectedSinkId = '';
       let selectedSinkLabel = 'System default';
@@ -139,11 +229,27 @@
         selectedSinkLabel = (option && option.text) || 'System default';
       }
 
+      // The routing diagram is the core of the pitch, so its two cells must track reality,
+      // not intent: the destination text and a "live" dot are driven purely by element
+      // state. Web Audio metering is avoided on purpose — wrapping the elements in an
+      // AudioContext would collapse both streams onto one sink and break the per-element
+      // setSinkId split (and iOS Safari support) that this demo exists to show.
+      function refreshActivity() {
+        mainActivity.classList.toggle('active', !video.paused && !video.ended);
+        const adLive = playAD.checked && !adAudio.paused && !adAudio.ended;
+        adActivity.classList.toggle('active', adLive);
+      }
+
+      function refreshADDestination() {
+        adDest.textContent = playAD.checked ? selectedSinkLabel : 'Off';
+      }
+
       function showFatalError(message) {
         unsupported.hidden = false;
         unsupported.textContent = message;
         playAD.disabled = true;
         adDestination.disabled = true;
+        enableDevices.disabled = true;
       }
 
       function checkSupport() {
@@ -180,8 +286,11 @@
           // We only needed the grant to unlock the device list, not the mic itself.
           stream.getTracks().forEach(track => track.stop());
         } catch (error) {
-          // Permission denied or no input device: fall back to the generic list.
+          // Reset so the user can retry the prompt from the same gesture; surface the
+          // failure to the caller so the button can offer that retry.
+          audioAccessRequested = false;
           console.error(error);
+          throw error;
         }
         await populateDevices();
       }
@@ -232,13 +341,14 @@
       async function onDestinationChange() {
         selectedSinkId = adDestination.value;
         setDestinationLabelFromSelection();
+        refreshADDestination();
         try {
           await routeADToSelectedSink();
           if (playAD.checked) {
-            setStatus(`Audio Description destination set to ${selectedSinkLabel}.`);
+            setStatus(`Audio description destination set to ${selectedSinkLabel}.`);
           }
         } catch (error) {
-          setStatus('Audio Description destination could not be changed.');
+          setStatus('Audio description destination could not be changed.');
           console.error(error);
         }
       }
@@ -257,9 +367,10 @@
         try {
           await adAudio.play();
         } catch (error) {
-          setStatus('Audio Description could not play. The browser may require another user action.');
+          setStatus('Audio description could not play. The browser may require another user action.');
           console.error(error);
         }
+        refreshActivity();
       }
 
       async function startADIfNeeded() {
@@ -270,36 +381,53 @@
           if (!video.paused && !video.ended) {
             await adAudio.play();
           }
-          setStatus(`Audio Description is on. Destination: ${selectedSinkLabel}.`);
+          setStatus(`Audio description is on. Destination: ${selectedSinkLabel}.`);
         } catch (error) {
           playAD.checked = false;
-          adDestination.disabled = true;
           adAudio.pause();
-          setStatus('Audio Description could not start. Check browser permissions and output device support.');
+          setStatus('Audio description could not start. Check browser permissions and output device support.');
           console.error(error);
         }
+        refreshADDestination();
+        refreshActivity();
       }
 
       function stopAD() {
         adAudio.pause();
-        setStatus('Audio Description is off.');
+        setStatus('Audio description is off.');
+        refreshADDestination();
+        refreshActivity();
       }
 
       function wireEvents() {
         playAD.addEventListener('change', async () => {
-          adDestination.disabled = !playAD.checked;
           if (playAD.checked) {
-            await ensureDeviceAccess();
             await startADIfNeeded();
           } else {
             stopAD();
           }
         });
 
-        // Opening the dropdown is a user gesture; use it to unlock the full device
-        // list the first time so Bluetooth and named outputs are selectable.
-        adDestination.addEventListener('pointerdown', ensureDeviceAccess);
-        adDestination.addEventListener('keydown', ensureDeviceAccess);
+        // getUserMedia must run from a user gesture; this button is that gesture. Once the
+        // grant unlocks real device labels the button has nothing left to do, so it locks.
+        enableDevices.addEventListener('click', async () => {
+          enableDevices.disabled = true;
+          enableDevices.textContent = 'Enabling…';
+          try {
+            await ensureDeviceAccess();
+            enableDevices.textContent = 'Device selection enabled';
+          } catch (error) {
+            enableDevices.disabled = false;
+            enableDevices.textContent = 'Enable device selection';
+            setStatus('Microphone permission is needed to name audio devices. Playback still works on the system default.');
+          }
+        });
+
+        // Opening the dropdown is also a user gesture; use it as a fallback path to unlock
+        // named and Bluetooth outputs if the explicit button was skipped.
+        const unlockFromDropdown = () => { ensureDeviceAccess().catch(() => {}); };
+        adDestination.addEventListener('pointerdown', unlockFromDropdown);
+        adDestination.addEventListener('keydown', unlockFromDropdown);
 
         adDestination.addEventListener('change', onDestinationChange);
 
@@ -324,11 +452,19 @@
           adAudio.pause();
           adAudio.currentTime = 0;
         });
+
+        // Keep the routing diagram's live dots honest by reflecting actual element state.
+        for (const name of ['play', 'playing', 'pause', 'waiting', 'ended', 'seeked']) {
+          video.addEventListener(name, refreshActivity);
+          adAudio.addEventListener(name, refreshActivity);
+        }
       }
 
       if (checkSupport()) {
         wireEvents();
         populateDevices();
+        refreshADDestination();
+        refreshActivity();
       }
     })();
   </script>
