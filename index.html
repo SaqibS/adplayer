@@ -85,6 +85,7 @@
       display: flex;
       flex-wrap: wrap;
       gap: 1rem;
+      margin: 0;
     }
 
     .stream {
@@ -104,6 +105,7 @@
     }
 
     .stream-dest {
+      margin: 0;
       font-size: 1.25rem;
       font-weight: 700;
     }
@@ -137,6 +139,20 @@
       max-width: 60ch;
       opacity: 0.85;
     }
+
+    /* The notice is transient feedback only (errors, permission prompts). It stays hidden
+       in the normal case so the routing panel above is the single steady-state surface. */
+    .notice {
+      max-width: 60ch;
+      margin: 0;
+      padding: 0.6rem 0.8rem;
+      border: 1px solid currentColor;
+      border-radius: 0.5rem;
+    }
+
+    .notice[hidden] {
+      display: none;
+    }
   </style>
 </head>
 <body>
@@ -161,18 +177,18 @@
 
     <section class="panel" aria-label="Audio routing">
       <h2>Audio routing</h2>
-      <div class="routing">
+      <dl class="routing">
         <div class="stream">
-          <span class="stream-role">Main soundtrack</span>
-          <span class="stream-dest" id="mainDest">System default speakers</span>
+          <dt class="stream-role">Main soundtrack</dt>
+          <dd class="stream-dest" id="mainDest">System default speakers</dd>
           <span class="activity" id="mainActivity" aria-hidden="true"></span>
         </div>
         <div class="stream">
-          <span class="stream-role">Audio description</span>
-          <span class="stream-dest" id="adDest">Off</span>
+          <dt class="stream-role">Audio description</dt>
+          <dd class="stream-dest" id="adDest">Off</dd>
           <span class="activity" id="adActivity" aria-hidden="true"></span>
         </div>
-      </div>
+      </dl>
     </section>
 
     <section class="panel">
@@ -205,7 +221,7 @@
         names of your speakers and headsets.
       </p>
 
-      <p id="status">Audio description is off.</p>
+      <p id="status" class="notice" hidden></p>
     </section>
   </main>
 
@@ -226,7 +242,10 @@
       let selectedSinkLabel = 'System default';
 
       function setStatus(message) {
-        statusEl.textContent = message;
+        // The routing panel owns steady state; this line is for transient feedback only,
+        // so an empty message hides it rather than leaving a second, redundant status area.
+        statusEl.textContent = message || '';
+        statusEl.hidden = !message;
       }
 
       function setDestinationLabelFromSelection() {
@@ -349,9 +368,9 @@
         refreshADDestination();
         try {
           await routeADToSelectedSink();
-          if (playAD.checked) {
-            setStatus(`Audio description destination set to ${selectedSinkLabel}.`);
-          }
+          // The routing panel already reflects the new destination, so on success just
+          // clear any stale notice instead of restating it here.
+          setStatus('');
         } catch (error) {
           setStatus('Audio description destination could not be changed.');
           console.error(error);
@@ -386,7 +405,7 @@
           if (!video.paused && !video.ended) {
             await adAudio.play();
           }
-          setStatus(`Audio description is on. Destination: ${selectedSinkLabel}.`);
+          setStatus('');
         } catch (error) {
           playAD.checked = false;
           adAudio.pause();
@@ -399,7 +418,7 @@
 
       function stopAD() {
         adAudio.pause();
-        setStatus('Audio description is off.');
+        setStatus('');
         refreshADDestination();
         refreshActivity();
       }
