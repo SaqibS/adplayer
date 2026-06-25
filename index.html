@@ -140,8 +140,10 @@
       opacity: 0.85;
     }
 
-    /* The notice is transient feedback only (errors, permission prompts). It stays hidden
-       in the normal case so the routing panel above is the single steady-state surface. */
+    /* The notice is transient feedback only — genuine errors and the permission prompt.
+       It is a role="alert" live region so screen-reader users hear failures they need to
+       act on, while routine state stays silent in the routing panel above. :empty hides the
+       box (and removes its chrome) whenever there is no message. */
     .notice {
       max-width: 60ch;
       margin: 0;
@@ -150,7 +152,7 @@
       border-radius: 0.5rem;
     }
 
-    .notice[hidden] {
+    .notice:empty {
       display: none;
     }
   </style>
@@ -221,7 +223,7 @@
         names of your speakers and headsets.
       </p>
 
-      <p id="status" class="notice" hidden></p>
+      <p id="status" class="notice" role="alert"></p>
     </section>
   </main>
 
@@ -242,10 +244,10 @@
       let selectedSinkLabel = 'System default';
 
       function setStatus(message) {
-        // The routing panel owns steady state; this line is for transient feedback only,
-        // so an empty message hides it rather than leaving a second, redundant status area.
+        // The routing panel owns steady state; this role="alert" line carries only transient
+        // failures. Emptying it both hides the box (via :empty) and clears the live region,
+        // so screen readers announce real errors without narrating routine state changes.
         statusEl.textContent = message || '';
-        statusEl.hidden = !message;
       }
 
       function setDestinationLabelFromSelection() {
