@@ -186,18 +186,23 @@
       </div>
 
       <div class="row">
-        <label for="adDestination">Audio description device</label>
-        <select id="adDestination">
+        <span id="deviceLabel">Audio description device</span>
+        <!-- Until the page holds an audio grant the browser hides device names, so we lead
+             with a button: clicking it is the gesture that requests permission, and it then
+             swaps itself for the populated, named dropdown. -->
+        <button id="chooseDevice" type="button" aria-describedby="deviceLabel">
+          Choose audio-description device…
+        </button>
+        <select id="adDestination" aria-labelledby="deviceLabel" hidden>
           <option value="">System default</option>
         </select>
-        <button id="enableDevices" type="button">Enable device selection</button>
       </div>
 
       <p class="hint">
-        Browsers hide audio output names until a page has audio permission, so the
-        list shows generic entries until you choose “Enable device selection” and accept
-        the one-time microphone prompt. The microphone is never recorded — the grant only
-        unlocks the names of your speakers and headsets.
+        Audio description plays on the system default until you pick a specific device.
+        Choosing one asks for the one-time microphone permission browsers require before they
+        reveal device names — the microphone is never recorded; the grant only unlocks the
+        names of your speakers and headsets.
       </p>
 
       <p id="status">Audio description is off.</p>
@@ -212,7 +217,7 @@
       const adDestination = document.getElementById('adDestination');
       const statusEl = document.getElementById('status');
       const unsupported = document.getElementById('unsupported');
-      const enableDevices = document.getElementById('enableDevices');
+      const chooseDevice = document.getElementById('chooseDevice');
       const adDest = document.getElementById('adDest');
       const mainActivity = document.getElementById('mainActivity');
       const adActivity = document.getElementById('adActivity');
@@ -249,7 +254,7 @@
         unsupported.textContent = message;
         playAD.disabled = true;
         adDestination.disabled = true;
-        enableDevices.disabled = true;
+        chooseDevice.disabled = true;
       }
 
       function checkSupport() {
@@ -408,26 +413,23 @@
           }
         });
 
-        // getUserMedia must run from a user gesture; this button is that gesture. Once the
-        // grant unlocks real device labels the button has nothing left to do, so it locks.
-        enableDevices.addEventListener('click', async () => {
-          enableDevices.disabled = true;
-          enableDevices.textContent = 'Enabling…';
+        // Choosing a device IS the gesture that requests permission. On success the button
+        // has done its job and is replaced by the now-named dropdown; on denial we keep the
+        // button so the user can retry, and the demo continues on the system default.
+        chooseDevice.addEventListener('click', async () => {
+          chooseDevice.disabled = true;
+          chooseDevice.textContent = 'Requesting permission…';
           try {
             await ensureDeviceAccess();
-            enableDevices.textContent = 'Device selection enabled';
+            chooseDevice.hidden = true;
+            adDestination.hidden = false;
+            adDestination.focus();
           } catch (error) {
-            enableDevices.disabled = false;
-            enableDevices.textContent = 'Enable device selection';
-            setStatus('Microphone permission is needed to name audio devices. Playback still works on the system default.');
+            chooseDevice.disabled = false;
+            chooseDevice.textContent = 'Choose audio-description device…';
+            setStatus('Microphone permission is needed to name audio devices. Audio description still works on the system default.');
           }
         });
-
-        // Opening the dropdown is also a user gesture; use it as a fallback path to unlock
-        // named and Bluetooth outputs if the explicit button was skipped.
-        const unlockFromDropdown = () => { ensureDeviceAccess().catch(() => {}); };
-        adDestination.addEventListener('pointerdown', unlockFromDropdown);
-        adDestination.addEventListener('keydown', unlockFromDropdown);
 
         adDestination.addEventListener('change', onDestinationChange);
 
